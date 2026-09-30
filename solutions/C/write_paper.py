@@ -36,12 +36,14 @@ def tab123(key, final=False):
     return '\n'.join(out)
 
 att = A['attr']
-gain_total = att['Q3_none']-att['Q3']
-g_state = att['Q3_none']-att['Q3_adj_old_fb0']; g_load = att['Q3_adj_old_fb0']-att['Q3_adj_old_fb1']; g_fc = att['Q3_adj_old_fb1']-att['Q3']
+base0 = att['Q2_mNd0']                      # 同口径基线：仅0:00计划，净需求裕量0(与问题3相同)
+gain_total = base0-att['Q3']; gain_q2 = att['Q3_none']-att['Q3']
+g_state = base0-att['Q3_adj_old_fb0']; g_load = att['Q3_adj_old_fb0']-att['Q3_adj_old_fb1']; g_fc = att['Q3_adj_old_fb1']-att['Q3']
 sub = {k: R[k]['total'] for k in ('Q3_sub_6', 'Q3_sub_12', 'Q3_sub_18', 'Q3_sub_6_12', 'Q3_sub_12_18')}
 q2sel = [r for r in q2cv if r['tag'] == 'Q2stoch' and r['kw']['wpv'] == 0.5 and r['kw']['mNd'] == 100 and r['kw']['tvf'] == 0][0]
 def kk(r): k = r['kw']; return f"{'随机' if r['tag']=='Q2stoch' else '确定'}, 光伏权重{k['wpv']}, " + (f"负载裕量{k['mL']:.0%}" if r['tag'] == 'Q2det' else f"净需求裕量{k['mNd']:.0f}kW, 期末储电价值系数{k['tvf']}")
 cvrows = sorted(q2cv, key=lambda r: r['h1'])[:5]
+E = A['estat']
 q3cv = [json.load(open(f'out/cvq3_{i}.json')) for i in range(4)]
 
 P = f"""# 微网与外部电网电力调控策略的两阶段滚动优化
@@ -49,10 +51,15 @@ P = f"""# 微网与外部电网电力调控策略的两阶段滚动优化
 ## 摘要
 
 针对含光伏与储能的非孤岛式微网，本文建立“日内线性规划 + 预测残差情景的两阶段随机规划 + 滚动调整 + 实时执行”的统一模型，解决问题1–4。
+
 **问题1**：以 10 分钟为步长、储能起止电量取 6000 kWh，求得全天购电量 {f2(Q1['energy'])} kWh、购电费 **{f2(Q1['cost'])} 元**（无储能基准 {f2(Q1['no_storage'])} 元，节省 {pct(Q1['no_storage'], Q1['cost'])}）；用独立线性规划复算完全一致。
+
 **问题2**：负载具有明显的星期周期（周五、周六偏低），以“同星期前两周均值”预测负载，以“官方光伏预报与前7日均值各半”预测光伏；用前 20 天的预测残差抽取 10 个情景，建立两阶段随机规划（第一阶段为购电量，第二阶段为各情景下的储能调度与 5 倍电价紧急购电）。2025.2.1–12.31 全年总费用 **{w(Q2['total'])} 万元**（计划购电 {w(Q2['plan'])} 万，紧急购电 {w(Q2['emergency'])} 万）。
-**问题3**：在 6:00、12:00、18:00 依据最新预报与实测储电量对剩余时段重新求解，并按违约（少购）电价 50%、超额（多购）电价 150% 计价，全年总费用 **{w(Q3['total'])} 万元**，比不调整低 {w(gain_total)} 万元（{pct(att['Q3_none'], att['Q3'])}）。逐层归因表明：其中 {g_state/gain_total*100:.0f}% 来自“按实测储电量重新规划”（状态反馈），{g_load/gain_total*100:.0f}% 来自用当日已观测负载偏差修正负载预测，仅 {g_fc/gain_total*100:.0f}%（{w(g_fc)} 万元）来自新发布的光伏预报，**故调整是必要的，但新预报本身的边际价值很小**；单独在某一时刻调整，收益依次为 18:00 > 12:00 > 6:00。
+
+**问题3**：在 6:00、12:00、18:00 依据最新预报与实测储电量对剩余时段重新求解，并按违约（少购）电价 50%、超额（多购）电价 150% 计价，全年总费用 **{w(Q3['total'])} 万元**，比同口径（同样的情景与裕量）只在 0:00 计划低 {w(gain_total)} 万元，比问题2 的最优设置低 {w(gain_q2)} 万元。同口径逐层归因：{g_state/gain_total*100:.0f}% 来自“按实测储电量重新规划”，{g_load/gain_total*100:.0f}% 来自用当日负载偏差修正，仅 {g_fc/gain_total*100:.0f}%（{w(g_fc)} 万元）来自新光伏预报——**调整是必要的，但新预报的边际价值很小**。
+
 **问题4**：电价服从波动，附件4 给出的是事后实际值。计划时刻取“同星期前两周均值”作为电价预测，结算按实际电价，问题2、3 的全年总费用分别为 **{w(Q42['total'])} 万元**、**{w(Q43['total'])} 万元**；若假设当日电价已知，分别为 {w(R['Q4_2_known']['total'])} 万、{w(R['Q4_3_known']['total'])} 万，可见电价预测误差的代价约 {w(Q42['total']-R['Q4_2_known']['total'])} 万元。
+
 检验方面：(1) 以完全信息全年线性规划为下界（问题2/3 为 {w(A['bound_Q2'])} 万元），本文问题2、3 分别高出 {pct(A['bound_Q2'], 2*A['bound_Q2']-Q2['total'])}、{pct(A['bound_Q2'], 2*A['bound_Q2']-Q3['total'])}；(2) 时间序列样本外检验（前半年/后半年互为调参与检验集）；(3) 效率口径（充放各 90% 与往返 90%）敏感性；(4) 与初版确定性模型对比，全年费用分别下降 {pct(V1['Q2'], Q2['total'])}、{pct(V1['Q3'], Q3['total'])}。
 
 **关键词**：微网；储能；两阶段随机规划；滚动优化；预测残差情景；违约电价
@@ -229,17 +236,20 @@ $$\\min\\ \\sum_{{k>h}}p_k(1.5u_k-0.5w_k)+\\frac1S\\sum_s\\sum_{{k>h}}5p_k e^s_k
 
 ### 7.4 问题3：是否需要引入其他时刻的预报（归因分析）
 
-| 方案 | 全年总费用(万元) | 相对仅0:00计划 |
+| 方案 | 全年总费用(万元) | 相对同口径基线 |
 |---|---|---|
-| 仅 0:00 计划（问题2） | {w(att['Q3_none'])} | — |
+| 基线A：仅 0:00 计划，净需求裕量 100 kW（**问题2 最优设置**） | {w(att['Q3_none'])} | 参考 |
+| 基线B：仅 0:00 计划，净需求裕量 0 kW（**与下面各行同口径**） | {w(base0)} | — |
 | 6/12/18 点重新规划，仍用 0:00 预报、不修正负载（**纯状态反馈**） | {w(att['Q3_adj_old_fb0'])} | −{w(g_state)} |
 | 再加当日负载偏差修正 | {w(att['Q3_adj_old_fb1'])} | −{w(g_state+g_load)} |
 | 再加新发布的光伏预报（**问题3方案**） | {w(att['Q3'])} | −{w(gain_total)} |
-| 使用官方原始预报（不与前7日均值加权） | {w(att['Q3_adj_raw_fb1'])} | −{w(att['Q3_none']-att['Q3_adj_raw_fb1'])} |
+| 使用官方原始预报（不与前7日均值加权） | {w(att['Q3_adj_raw_fb1'])} | −{w(base0-att['Q3_adj_raw_fb1'])} |
+
+**基线口径说明**：问题3 的调整可以在当日纠偏，因此其最优净需求裕量为 0（见 7.3 节）；问题2 只能在 0:00 一次决策，需要 100 kW 裕量才最优。归因表的后四行都用裕量 0、同样的情景数，因此以基线B 为起点才能把“调整”的收益与“裕量选取”的收益分开。基线B 比基线A 贵 {w(base0-att['Q3_none'])} 万元（紧急购电更多），若以基线A 为起点，调整总收益为 {w(gain_q2)} 万元，三项占比为 {(att['Q3_none']-att['Q3_adj_old_fb0'])/gain_q2*100:.0f}% / {g_load/gain_q2*100:.0f}% / {g_fc/gain_q2*100:.0f}%（状态反馈含“裕量由 100 改 0”的效果）。两种口径下结论一致：新光伏预报的贡献都不超过 15%。
 
 ![图3](../../results/C/figures/fig3_attr.png)
 
-结论：**需要在 6:00、12:00、18:00 调整购电策略，但调整的主要价值是“按实测储电量与已发生偏差重新规划”（占 {g_state/gain_total*100:.0f}%）和“利用当日负载偏差”（{g_load/gain_total*100:.0f}%）；新光伏预报只贡献 {g_fc/gain_total*100:.0f}%（{w(g_fc)} 万元）**。18:00 预报本身的误差很小并不说明它有价值——那时光伏已近于零。
+结论：**需要在 6:00、12:00、18:00 调整购电策略，但调整的主要价值是“按实测储电量与已发生偏差重新规划”（占 {g_state/gain_total*100:.0f}%）和“利用当日负载偏差”（{g_load/gain_total*100:.0f}%）；新光伏预报只贡献 {g_fc/gain_total*100:.0f}%（{w(g_fc)} 万元，同口径）**。18:00 预报本身的误差很小并不说明它有价值——那时光伏已近于零。
 
 调整时刻的取舍（问题3 方案的子集，全年总费用/万元）：只在 6:00：{w(sub['Q3_sub_6'])}；只在 12:00：{w(sub['Q3_sub_12'])}；只在 18:00：{w(sub['Q3_sub_18'])}；6:00+12:00：{w(sub['Q3_sub_6_12'])}；12:00+18:00：{w(sub['Q3_sub_12_18'])}；三个时刻：{w(Q3['total'])}。越晚调整越有价值（剩余不确定性小、可补偿的紧急缺口多），三次都调整最好，前两次可以视需要省略。
 
@@ -250,7 +260,11 @@ $$\\min\\ \\sum_{{k>h}}p_k(1.5u_k-0.5w_k)+\\frac1S\\sum_s\\sum_{{k>h}}5p_k e^s_k
 1. **效率口径**：若把“90%”理解为往返效率（充放各 $\\sqrt{{0.9}}$）：问题1 费用降至 {f2(Q1['roundtrip_cost'])} 元（{pct(Q1['cost'], Q1['roundtrip_cost'])}）；问题2 全年 {w(R['Q2_rt']['total'])} 万元（{pct(Q2['total'], R['Q2_rt']['total'])}），问题3 {w(R['Q3_rt']['total'])} 万元（{pct(Q3['total'], R['Q3_rt']['total'])}）。口径不改变策略结构，只改变绝对费用，题面按“充放各 90%”本文取此口径。
 2. **问题1 起止储电量**：起止值取 1200/3000/6000/9000/10800 kWh 时费用分别为 """ + ' / '.join(f2(v) for v in Q1['E0_scan'].values()) + f""" 元，起止值自由时最优 {int(Q1['free_E0'])} kWh、{f2(Q1['free_E0_cost'])} 元，仅比 6000 kWh 低 {f2(Q1['cost']-Q1['free_E0_cost'])} 元。
 3. **问题4 电价已知的假设**：把当日实际电价视为已知（问题2/3：{w(R['Q4_2_known']['total'])}/{w(R['Q4_3_known']['total'])} 万元）、用同星期前两周均值预测（{w(Q42['total'])}/{w(Q43['total'])} 万元）、以及把附件1 典型日电价当作预测（{w(R['Q4_2_typ']['total'])}/{w(R['Q4_3_typ']['total'])} 万元）三者相比：预测误差使费用增加约 {w(Q42['total']-R['Q4_2_known']['total'])} 万元；而“同星期”预测的电价误差减半（{f2(M['price_fc']['同星期前2周均值'])} 对 {f2(M['price_fc']['附件1典型日'])}）却没有带来更低的费用，说明电价整体形状（峰谷）对充放电时序才是关键，日间小幅波动影响不大。
-4. **净需求裕量与样本量**：随机规划的样本数 S 与窗口 K 增大（S=20,K=30）并不降低费用（初版试验），说明主要误差不在情景数量，而在残差的季节非平稳性。
+4. **情景数与窗口**：问题2 的随机规划把情景数与窗口从 (S=10,K=20) 增大到 (S=20,K=30)，全年费用由 {w(Q2['total'])} 万元变为 {w(R['Q2_S20K30']['total'])} 万元，并不下降，说明主要误差不在情景数量，而在残差随季节的非平稳性。
+
+### 7.6 问题3 紧急购电天数为何多于问题2
+
+问题3 出现紧急购电的天数（{Q3['days_emerg']} 天）比问题2（{Q2['days_emerg']} 天）多，但总量与费用更少：紧急购电量 {w(Q3['emergency_kwh'])} 万 kWh 对 {w(Q2['emergency_kwh'])} 万 kWh，紧急购电费 {w(Q3['emergency'])} 万元对 {w(Q2['emergency'])} 万元。原因是两者的安全裕量不同：问题2 只能在 0:00 一次决策，需 100 kW 的净需求裕量兜底，因此小偏差都被裕量吸收，缺电集中在预测严重偏低的极端日（缺口超过 1000 kWh 的有 {E['Q2']['d1000']} 天，单日最大 {E['Q2']['maxday']:.0f} kWh）；问题3 可在 6:00/12:00/18:00 纠偏，最优裕量为 0，于是更多天在个别时段出现缺口（超过 100 kWh 的有 {E['Q3']['d100']} 天，对 {E['Q2']['d100']} 天），但极端日更少（超过 1000 kWh 的 {E['Q3']['d1000']} 天，单日最大 {E['Q3']['maxday']:.0f} kWh），因为当日反馈把大缺口提前补上。每个出现缺口的日子的缺口中位数相近（{E['Q3']['median']:.0f} 对 {E['Q2']['median']:.0f} kWh）。作为对照，问题2 若同样取裕量 0，紧急购电天数为 {R['Q2_mNd0']['days_emerg']} 天、{w(R['Q2_mNd0']['emergency_kwh'])} 万 kWh、{w(R['Q2_mNd0']['emergency'])} 万元，都远高于问题3。因此“天数多”是有意的取舍，而不是调整变差。
 
 ## 八、模型评价
 
@@ -266,13 +280,26 @@ $$\\min\\ \\sum_{{k>h}}p_k(1.5u_k-0.5w_k)+\\frac1S\\sum_s\\sum_{{k>h}}5p_k e^s_k
 
 ## 附录：文件与复现
 
+**复现步骤**（须在 `solutions/C` 目录下运行；依赖 numpy、scipy、pandas、openpyxl、matplotlib；全部约 15–25 分钟）：
+
+```bash
+cd solutions/C
+python run_all.py 1; python run_all.py 2; python run_all.py 3; python run_all.py 4; python run_all.py 5   # 各分片可并行
+for i in 0 1 2 3; do python cv_q3.py $i; done                                                          # 问题3 参数样本外检验
+python cv_grid.py                                                                                      # 问题2 参数样本外检验(约 10 分钟)
+python analysis_final.py && python make_results.py && python check_results.py && python write_paper.py
+```
+
+`bash reproduce.sh` 依次执行以上全部步骤。
+
 - `solutions/C/core2.py`：数据读取、预测、两阶段 LP、调整 LP、执行；`solve_det` 为问题1 与下界的确定性 LP。
-- `solutions/C/run_all.py 1|2|3|4`：全部实验（并行分片，输出 `out/*.pkl,*.json`）。
-- `solutions/C/analysis_final.py`：问题1、下界、预报误差、图 1–5。
+- `solutions/C/run_all.py 1..5`：全部实验（输出 `out/*.json`，中间结果 `out/*.pkl` 不入库）。
+- `solutions/C/analysis_final.py`：问题1、下界、预报误差、图 1–5，输出 `results/C/analysis.json`。
 - `solutions/C/make_results.py`：填写官方模板，生成 `results/C/result1/2/3/4-2/4-3.xlsx` 与 `tables.json`。
-- `solutions/C/write_paper.py`：由结果 JSON 生成本文。
-- `solutions/C/cv_grid.py`：样本外检验网格（输出 `cv_grid.json`）。
-- `solutions/C/common.py, q1.py, q2.py, q3.py, 报告.md`：初版（确定性 LP + 比例裕量）代码与报告，保留作对比基线。
+- `solutions/C/check_results.py`：结果一致性检查。
+- `solutions/C/write_paper.py`：由结果 JSON 生成本文；`论文.pdf` 为排版版本。
+- `solutions/C/cv_grid.py`、`cv_q3.py`：样本外检验（`cv_grid.json`、`out/cvq3_*.json`）。
+- `solutions/C/common.py, q1.py, q2.py, q3.py, 报告.md`：初版（确定性 LP + 比例裕量）代码与报告，保留作对比基线，初版全年费用为 1418.27 万（问题2）、1370.99 万（问题3）。
 """
 open('论文.md', 'w').write(P)
 print(len(P))

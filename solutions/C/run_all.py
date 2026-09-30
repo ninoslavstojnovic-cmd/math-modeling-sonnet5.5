@@ -23,4 +23,6 @@ elif shard == '3':   # 问题4
 elif shard == '4':   # 效率口径 + 调整时刻子集
     Eff.set('roundtrip'); go('Q2_rt', p1, **Q2); go('Q3_rt', p1, **Q3); Eff.set('each')
     for hs in ((6,), (12,), (18,), (6, 12), (12, 18)): go('Q3_sub_' + '_'.join(map(str, hs)), p1, **dict(Q3, adjust=hs))
+elif shard == '5':   # 归因基线口径统一 + 情景数敏感性
+    go('Q2_mNd0', p1, **dict(Q2, mNd=0.)); go('Q2_S20K30', p1, **dict(Q2, S=20, K=30))
 pickle.dump(outs, open(f'out/{shard}.pkl', 'wb')); json.dump(res, open(f'out/{shard}.json', 'w'), ensure_ascii=False)

@@ -11,7 +11,7 @@ FIG = '../../results/C/figures'; os.makedirs(FIG, exist_ok=True)
 d = load_data(); p1 = d['price1']; p4 = d['price4']; A = {}
 o1 = pickle.load(open('out/1.pkl', 'rb')); o3 = pickle.load(open('out/3.pkl', 'rb'))
 R = {}
-for f in ('1', '2', '3', '4'): R.update(json.load(open(f'out/{f}.json')))
+for f in ('1', '2', '3', '4', '5'): R.update(json.load(open(f'out/{f}.json')))
 
 # ---- 问题1
 nd1 = d['load1']-d['pv1']
@@ -54,11 +54,11 @@ for j, (nm, lab) in enumerate((('official', '官方预报'), ('mean7', '前7日�
 ax.set_xticks(range(4)); ax.set_xticklabels([f'{k}发布' for k in ks]); ax.set_ylabel('剩余时段平均绝对误差(kW)'); ax.legend(); ax.set_title('图2 光伏功率预报误差(2.1-12.31)')
 fig.tight_layout(); fig.savefig(f'{FIG}/fig2_pvfc.png', dpi=130); plt.close(fig)
 # 图3 归因
-lv = [('仅0:00计划\n(问题2)', R['Q3_none']['total']), ('+6/12/18点\n状态反馈', R['Q3_adj_old_fb0']['total']), ('+当日负载\n偏差修正', R['Q3_adj_old_fb1']['total']), ('+新光伏预报\n(问题3)', R['Q3']['total'])]
-fig, ax = plt.subplots(figsize=(8, 4)); ax.bar([a for a, _ in lv], [b/1e4 for _, b in lv], color=['C7', 'C0', 'C0', 'C2'])
+lv = [('仅0:00计划\n(裕量100,问题2)', R['Q3_none']['total']), ('仅0:00计划\n(裕量0,同口径)', R['Q2_mNd0']['total']), ('+6/12/18点\n状态反馈', R['Q3_adj_old_fb0']['total']), ('+当日负载\n偏差修正', R['Q3_adj_old_fb1']['total']), ('+新光伏预报\n(问题3)', R['Q3']['total'])]
+fig, ax = plt.subplots(figsize=(9.5, 4)); ax.bar([a for a, _ in lv], [b/1e4 for _, b in lv], color=['C7', 'C7', 'C0', 'C0', 'C2'])
 for i, (_, b) in enumerate(lv): ax.text(i, b/1e4+1, f'{b/1e4:.1f}', ha='center')
-ax.set_ylim(1300, 1385); ax.set_ylabel('全年总费用(万元)'); ax.set_title('图3 问题3：调整收益的逐层归因'); fig.tight_layout(); fig.savefig(f'{FIG}/fig3_attr.png', dpi=130); plt.close(fig)
-A['attr'] = {k: R[k]['total'] for k in ('Q3_none', 'Q3_adj_old_fb0', 'Q3_adj_old_fb1', 'Q3_adj_new_fb0', 'Q3_adj_raw_fb1', 'Q3')}
+ax.set_ylim(1300, 1405); ax.set_ylabel('全年总费用(万元)'); ax.set_title('图3 问题3：调整收益的逐层归因(纵轴自1300起)'); fig.tight_layout(); fig.savefig(f'{FIG}/fig3_attr.png', dpi=130); plt.close(fig)
+A['attr'] = {k: R[k]['total'] for k in ('Q3_none', 'Q2_mNd0', 'Q2_S20K30', 'Q3_adj_old_fb0', 'Q3_adj_old_fb1', 'Q3_adj_new_fb0', 'Q3_adj_raw_fb1', 'Q3')}
 # 图4 月度费用
 dates = d['dates']; mon = lambda o: np.array([sum(x['cost_plan']+x['cost_em'] for x in o if x['t'] >= 31 and dates[x['t']].month == m) for m in range(2, 13)])/1e4
 fig, ax = plt.subplots(figsize=(9, 4)); ax.plot(range(2, 13), mon(o1['Q2']), 'o-', label='问题2'); ax.plot(range(2, 13), mon(o1['Q3']), 's-', label='问题3')
@@ -72,6 +72,11 @@ ax[1].plot(tt, o['Es']); ax[1].axhline(1200, ls=':', c='gray'); ax[1].axhline(10
 for a in ax:
     for h in (6, 12, 18): a.axvline(h, c='r', ls=':', lw=0.8)
 ax[0].set_title('图5 2025-06-21 问题3调整过程(红线为预报时刻)'); fig.tight_layout(); fig.savefig(f'{FIG}/fig5_day.png', dpi=130); plt.close(fig)
+def estat(res):
+    em = np.array([o['em'].sum() for o in res if o['t'] >= 31])
+    return dict(days=int((em > 1e-6).sum()), d100=int((em > 100).sum()), d1000=int((em > 1000).sum()), maxday=float(em.max()), median=float(np.median(em[em > 1e-6])))
+o5 = pickle.load(open('out/5.pkl', 'rb'))
+A['estat'] = dict(Q2=estat(o1['Q2']), Q3=estat(o1['Q3']), Q2_mNd0=estat(o5['Q2_mNd0']))
 A['R'] = R
 json.dump(A, open('../../results/C/analysis.json', 'w'), ensure_ascii=False, indent=1, default=float)
 print(json.dumps({k: v for k, v in A.items() if k not in ('R', 'attr')}, ensure_ascii=False, indent=1, default=float)[:3500])
